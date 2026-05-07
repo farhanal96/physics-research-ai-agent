@@ -1,6 +1,6 @@
 # Physics Research AI Agent
 
-An autonomous AI agent that searches arXiv for physics papers, reads abstracts, extracts key findings, and answers research questions — powered by **Claude API** and the **arXiv API**.
+An autonomous AI agent that searches arXiv for physics papers, reads abstracts, extracts key findings, and answers research questions — powered by **Google Gemini** (free) and the **arXiv API**.
 
 > Built as a portfolio project to demonstrate AI agent engineering in a physics domain.
 
@@ -21,10 +21,10 @@ This is what makes it an **agent** (not a chatbot) — it decides on its own whi
 
 | Component | Technology |
 |-----------|-----------|
-| AI Model | Claude (Anthropic API) |
+| AI Model | Gemini 1.5 Flash (Google — free tier) |
 | Paper Database | arXiv via `arxiv` Python library |
 | Language | Python 3.10+ |
-| Tool Use | Claude's native tool-use API |
+| Tool Use | Gemini function calling API |
 
 ## Project Structure
 
@@ -33,7 +33,7 @@ physics-research-ai-agent/
 ├── tools/
 │   ├── __init__.py
 │   └── arxiv_tool.py      # arXiv search + paper detail tools
-├── agent.py               # agentic loop — Claude + tools
+├── agent.py               # agentic loop — Gemini + tools
 ├── main.py                # CLI entry point
 ├── requirements.txt
 └── .env.example
@@ -52,13 +52,18 @@ cd physics-research-ai-agent
 pip install -r requirements.txt
 ```
 
-**3. Set your API key**
+**3. Get your free API key**
+- Go to https://aistudio.google.com/apikey
+- Sign in with your Google account
+- Click **Create API key** — it's free, no credit card needed
+
+**4. Set your API key**
 ```bash
-cp .env.example .env
-# Open .env and add your key from https://console.anthropic.com/
+copy .env.example .env
+# Open .env and paste your key
 ```
 
-**4. Run the agent**
+**5. Run the agent**
 ```bash
 python main.py
 ```
@@ -82,20 +87,20 @@ python main.py
 
 ## How the Agent Works
 
-The agent uses Claude's **tool-use API** in a loop:
+The agent uses Gemini's **function calling API** in a loop:
 
 ```
 User question
      ↓
-Claude decides: "I need to search arXiv"
+Gemini decides: "I need to search arXiv"
      ↓
-We run search_arxiv() and send results back to Claude
+We run search_arxiv() and send results back to Gemini
      ↓
-Claude decides: "I want more detail on paper X"
+Gemini decides: "I want more detail on paper X"
      ↓
 We run get_paper_details() and send results back
      ↓
-Claude has enough info → writes final answer
+Gemini has enough info → writes final answer
 ```
 
 This loop pattern (often called a ReAct loop) is the foundation of all modern AI agents.
