@@ -120,7 +120,7 @@ class PhysicsResearchAgent:
     def __init__(self, verbose: bool = True):
         self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.verbose = verbose
-        self.model = "llama-3.3-70b-versatile"  # best free Groq model
+        self.model = "llama3-groq-70b-8192-tool-use-preview"  # fine-tuned for tool use
         # Full conversation history — includes system, user, assistant, and tool messages
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
