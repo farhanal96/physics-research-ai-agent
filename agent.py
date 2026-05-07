@@ -116,7 +116,7 @@ class PhysicsResearchAgent:
         api_key = os.getenv("GEMINI_API_KEY")
         self.client = genai.Client(api_key=api_key)
         self.verbose = verbose
-        self.model = "gemini-1.5-flash"
+        self.model = "gemini-2.0-flash"
         # Full conversation history stored as a list of Content objects
         self.history = []
 

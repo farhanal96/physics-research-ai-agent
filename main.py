@@ -18,7 +18,7 @@ from agent import PhysicsResearchAgent
 BANNER = """
 ╔══════════════════════════════════════════════════════════════╗
 ║          Physics Research AI Agent                          ║
-║          Powered by Claude + arXiv                          ║
+║          Powered by Gemini + arXiv                          ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Ask any physics research question.                         ║
 ║  The agent will search arXiv and summarise real papers.     ║
