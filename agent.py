@@ -1,18 +1,21 @@
 """
-agent.py — The core agent loop, powered by Google Gemini (free tier).
+agent.py — The core agent loop, powered by Groq (free tier).
+
+Groq runs Llama 3.3 70B for free — no credit card, no expiry.
+The tool-use logic (agentic loop) is identical regardless of which
+AI provider we use. Only the API calls differ.
 
 How it works:
-  1. We send the user's question to Gemini along with our two arXiv tools.
-  2. Gemini decides: "I need to search arXiv" → returns a function_call.
-  3. We actually run the tool and send the result back to Gemini.
-  4. Gemini either calls another tool OR writes its final answer.
-  5. Repeat until Gemini is done (this is called the agentic loop).
+  1. We send the user's question to the model with a list of tools.
+  2. The model decides: "I need to search arXiv" → returns tool_calls.
+  3. We actually run the tool and send the result back.
+  4. The model either calls another tool OR writes its final answer.
+  5. Repeat until done. This is the agentic loop.
 """
 
 import json
 import os
-from google import genai
-from google.genai import types
+from groq import Groq
 from dotenv import load_dotenv
 from tools import search_arxiv, get_paper_details
 
@@ -37,59 +40,61 @@ Format your final answer with clear sections:
 - **Suggested Follow-up** (what else they might want to search)
 """
 
-# ── Tool definitions for Gemini ───────────────────────────────────────────────
+# ── Tool definitions (OpenAI / Groq format) ───────────────────────────────────
 
-ARXIV_TOOLS = [
-    types.Tool(
-        function_declarations=[
-            types.FunctionDeclaration(
-                name="search_arxiv",
-                description=(
-                    "Search arXiv for physics research papers on any topic. "
-                    "Returns titles, authors, abstracts, and paper IDs. "
-                    "Use this first when the user asks about a physics topic."
-                ),
-                parameters=types.Schema(
-                    type=types.Type.OBJECT,
-                    properties={
-                        "query": types.Schema(
-                            type=types.Type.STRING,
-                            description="Search query — use specific physics terminology for best results",
-                        ),
-                        "max_results": types.Schema(
-                            type=types.Type.INTEGER,
-                            description="Number of papers to return. Default 5, max 10.",
-                        ),
-                        "category": types.Schema(
-                            type=types.Type.STRING,
-                            description=(
-                                "Optional arXiv category filter. Examples: 'quant-ph', "
-                                "'cond-mat', 'hep-th', 'astro-ph', 'physics.bio-ph'"
-                            ),
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search_arxiv",
+            "description": (
+                "Search arXiv for physics research papers on any topic. "
+                "Returns titles, authors, abstracts, and paper IDs. "
+                "Use this first when the user asks about a physics topic."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query — use specific physics terminology for best results",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Number of papers to return. Default 5, max 10.",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": (
+                            "Optional arXiv category filter. Examples: 'quant-ph', "
+                            "'cond-mat', 'hep-th', 'astro-ph', 'physics.bio-ph'"
                         ),
                     },
-                    required=["query"],
-                ),
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_paper_details",
+            "description": (
+                "Fetch the complete abstract and full metadata for a specific arXiv paper "
+                "using its arXiv ID. Use this after search_arxiv to dig deeper into a relevant paper."
             ),
-            types.FunctionDeclaration(
-                name="get_paper_details",
-                description=(
-                    "Fetch the complete abstract and full metadata for a specific arXiv paper "
-                    "using its arXiv ID. Use this after search_arxiv to dig deeper into a paper."
-                ),
-                parameters=types.Schema(
-                    type=types.Type.OBJECT,
-                    properties={
-                        "arxiv_id": types.Schema(
-                            type=types.Type.STRING,
-                            description="The arXiv paper ID, e.g. '2401.12345' or '2401.12345v2'",
-                        ),
-                    },
-                    required=["arxiv_id"],
-                ),
-            ),
-        ]
-    )
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "arxiv_id": {
+                        "type": "string",
+                        "description": "The arXiv paper ID, e.g. '2401.12345' or '2401.12345v2'",
+                    }
+                },
+                "required": ["arxiv_id"],
+            },
+        },
+    },
 ]
 
 
@@ -113,12 +118,11 @@ class PhysicsResearchAgent:
     """
 
     def __init__(self, verbose: bool = True):
-        api_key = os.getenv("GEMINI_API_KEY")
-        self.client = genai.Client(api_key=api_key)
+        self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         self.verbose = verbose
-        self.model = "gemini-2.0-flash-lite"
-        # Full conversation history stored as a list of Content objects
-        self.history = []
+        self.model = "llama-3.3-70b-versatile"  # best free Groq model
+        # Full conversation history — includes system, user, assistant, and tool messages
+        self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
 
     def _log(self, message: str):
         if self.verbose:
@@ -127,12 +131,9 @@ class PhysicsResearchAgent:
     def ask(self, user_question: str) -> str:
         """
         Send a question to the agent and get a research-backed answer.
-        Runs the agentic loop until Gemini stops calling tools.
+        Runs the agentic loop until the model stops calling tools.
         """
-        # Add the user message to history
-        self.history.append(
-            types.Content(role="user", parts=[types.Part(text=user_question)])
-        )
+        self.messages.append({"role": "user", "content": user_question})
 
         iteration = 0
         max_iterations = 10
@@ -141,62 +142,45 @@ class PhysicsResearchAgent:
             iteration += 1
             self._log(f"Thinking... (step {iteration})")
 
-            response = self.client.models.generate_content(
+            response = self.client.chat.completions.create(
                 model=self.model,
-                contents=self.history,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    tools=ARXIV_TOOLS,
-                ),
+                messages=self.messages,
+                tools=TOOLS,
+                tool_choice="auto",
+                max_tokens=4096,
             )
 
-            candidate = response.candidates[0]
-            response_content = candidate.content
+            message = response.choices[0].message
 
-            # Add Gemini's response to history
-            self.history.append(response_content)
+            # Add the assistant's response to history
+            self.messages.append(message)
 
-            # Collect any function calls from the response
-            function_calls = [
-                part.function_call
-                for part in response_content.parts
-                if part.function_call is not None
-            ]
+            # ── Case 1: model wants to use tools ──────────────────────────────
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    tool_name = tc.function.name
+                    tool_args = json.loads(tc.function.arguments)
 
-            if not function_calls:
-                # No tool calls — extract final text and return
-                final_text = "".join(
-                    part.text
-                    for part in response_content.parts
-                    if part.text is not None
-                )
+                    self._log(f"Using tool: {tool_name}({json.dumps(tool_args)})")
+
+                    result_str = run_tool(tool_name, tool_args)
+                    self._log(f"Tool returned {len(result_str)} characters")
+
+                    # Send the tool result back as a "tool" role message
+                    self.messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result_str,
+                    })
+
+            # ── Case 2: model has a final answer ──────────────────────────────
+            else:
                 self._log(f"Done after {iteration} steps.")
-                return final_text or "No answer generated. Try rephrasing your question."
-
-            # Run each tool and collect results
-            tool_response_parts = []
-            for fc in function_calls:
-                tool_args = dict(fc.args) if fc.args else {}
-                self._log(f"Using tool: {fc.name}({json.dumps(tool_args)})")
-
-                result_str = run_tool(fc.name, tool_args)
-                self._log(f"Tool returned {len(result_str)} characters")
-
-                tool_response_parts.append(
-                    types.Part.from_function_response(
-                        name=fc.name,
-                        response={"result": result_str},
-                    )
-                )
-
-            # Send all tool results back as a user message
-            self.history.append(
-                types.Content(role="user", parts=tool_response_parts)
-            )
+                return message.content or "No answer generated."
 
         return "Agent hit the iteration limit. Try a more specific question."
 
     def reset(self):
-        """Clear conversation history to start a fresh research session."""
-        self.history = []
+        """Clear conversation history (keep system prompt) for a fresh session."""
+        self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
         self._log("Conversation history cleared.")

@@ -18,7 +18,7 @@ from agent import PhysicsResearchAgent
 BANNER = """
 ╔══════════════════════════════════════════════════════════════╗
 ║          Physics Research AI Agent                          ║
-║          Powered by Gemini + arXiv                          ║
+║          Powered by Groq + arXiv                           ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Ask any physics research question.                         ║
 ║  The agent will search arXiv and summarise real papers.     ║
@@ -39,11 +39,11 @@ EXAMPLE_QUESTIONS = [
 
 def check_api_key():
     """Make sure the API key is set before we start."""
-    key = os.getenv("GEMINI_API_KEY")
+    key = os.getenv("GROQ_API_KEY")
     if not key or key == "your_api_key_here":
-        print("\n❌  GEMINI_API_KEY not set.")
+        print("\n❌  GROQ_API_KEY not set.")
         print("    1. Copy .env.example to .env")
-        print("    2. Get your free key from https://aistudio.google.com/apikey")
+        print("    2. Get your free key from https://console.groq.com/keys")
         print("    3. Paste it into your .env file")
         print("    4. Run again\n")
         sys.exit(1)
