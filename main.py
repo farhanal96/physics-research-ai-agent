@@ -79,8 +79,19 @@ def run_interactive():
             continue
 
         print("\n" + "─" * 64)
-        answer = agent.ask(user_input)
-        print("\n" + answer)
+        try:
+            answer = agent.ask(user_input)
+            print("\n" + answer)
+        except Exception as e:
+            err = str(e)
+            if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                print("\n❌  Rate limit hit. Two possible causes:")
+                print("    1. Your API key quota is exhausted — wait a minute and retry.")
+                print("    2. You shared your key publicly — regenerate it at aistudio.google.com/apikey")
+            elif "API_KEY" in err or "401" in err or "403" in err:
+                print("\n❌  Invalid API key. Check your .env file.")
+            else:
+                print(f"\n❌  Error: {err}")
         print("─" * 64)
 
 
