@@ -11,8 +11,8 @@ How it works:
 
 import json
 import os
-import google.generativeai as genai
-from google.generativeai.types import FunctionDeclaration, Tool
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 from tools import search_arxiv, get_paper_details
 
@@ -38,51 +38,59 @@ Format your final answer with clear sections:
 """
 
 # ── Tool definitions for Gemini ───────────────────────────────────────────────
-# We define each tool explicitly so Gemini knows exactly what arguments
-# each function accepts — same idea as before, just Gemini's format.
 
-SEARCH_TOOL = FunctionDeclaration(
-    name="search_arxiv",
-    description="Search arXiv for physics research papers on any topic. Returns titles, authors, abstracts, and paper IDs. Use this first when the user asks about a physics topic.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Search query — use specific physics terminology for best results",
-            },
-            "max_results": {
-                "type": "integer",
-                "description": "Number of papers to return. Default 5, max 10.",
-            },
-            "category": {
-                "type": "string",
-                "description": (
-                    "Optional arXiv category filter. Examples: 'quant-ph', "
-                    "'cond-mat', 'hep-th', 'astro-ph', 'physics.bio-ph'"
+ARXIV_TOOLS = [
+    types.Tool(
+        function_declarations=[
+            types.FunctionDeclaration(
+                name="search_arxiv",
+                description=(
+                    "Search arXiv for physics research papers on any topic. "
+                    "Returns titles, authors, abstracts, and paper IDs. "
+                    "Use this first when the user asks about a physics topic."
                 ),
-            },
-        },
-        "required": ["query"],
-    },
-)
-
-DETAILS_TOOL = FunctionDeclaration(
-    name="get_paper_details",
-    description="Fetch the complete abstract and full metadata for a specific arXiv paper using its arXiv ID. Use this after search_arxiv to dig deeper into a relevant paper.",
-    parameters={
-        "type": "object",
-        "properties": {
-            "arxiv_id": {
-                "type": "string",
-                "description": "The arXiv paper ID, e.g. '2401.12345' or '2401.12345v2'",
-            }
-        },
-        "required": ["arxiv_id"],
-    },
-)
-
-ARXIV_TOOLS = Tool(function_declarations=[SEARCH_TOOL, DETAILS_TOOL])
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "query": types.Schema(
+                            type=types.Type.STRING,
+                            description="Search query — use specific physics terminology for best results",
+                        ),
+                        "max_results": types.Schema(
+                            type=types.Type.INTEGER,
+                            description="Number of papers to return. Default 5, max 10.",
+                        ),
+                        "category": types.Schema(
+                            type=types.Type.STRING,
+                            description=(
+                                "Optional arXiv category filter. Examples: 'quant-ph', "
+                                "'cond-mat', 'hep-th', 'astro-ph', 'physics.bio-ph'"
+                            ),
+                        ),
+                    },
+                    required=["query"],
+                ),
+            ),
+            types.FunctionDeclaration(
+                name="get_paper_details",
+                description=(
+                    "Fetch the complete abstract and full metadata for a specific arXiv paper "
+                    "using its arXiv ID. Use this after search_arxiv to dig deeper into a paper."
+                ),
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "arxiv_id": types.Schema(
+                            type=types.Type.STRING,
+                            description="The arXiv paper ID, e.g. '2401.12345' or '2401.12345v2'",
+                        ),
+                    },
+                    required=["arxiv_id"],
+                ),
+            ),
+        ]
+    )
+]
 
 
 def run_tool(tool_name: str, tool_input: dict) -> str:
@@ -106,16 +114,11 @@ class PhysicsResearchAgent:
 
     def __init__(self, verbose: bool = True):
         api_key = os.getenv("GEMINI_API_KEY")
-        genai.configure(api_key=api_key)
-
-        self.model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",  # free tier model
-            tools=[ARXIV_TOOLS],
-            system_instruction=SYSTEM_PROMPT,
-        )
+        self.client = genai.Client(api_key=api_key)
         self.verbose = verbose
-        # Start a chat session — this automatically tracks conversation history
-        self.chat = self.model.start_chat(enable_automatic_function_calling=False)
+        self.model = "gemini-1.5-flash"
+        # Full conversation history stored as a list of Content objects
+        self.history = []
 
     def _log(self, message: str):
         if self.verbose:
@@ -126,56 +129,74 @@ class PhysicsResearchAgent:
         Send a question to the agent and get a research-backed answer.
         Runs the agentic loop until Gemini stops calling tools.
         """
-        self._log("Thinking... (step 1)")
-        response = self.chat.send_message(user_question)
+        # Add the user message to history
+        self.history.append(
+            types.Content(role="user", parts=[types.Part(text=user_question)])
+        )
 
-        iteration = 1
+        iteration = 0
         max_iterations = 10
 
         while iteration < max_iterations:
-            # Collect any function calls Gemini wants to make
+            iteration += 1
+            self._log(f"Thinking... (step {iteration})")
+
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=self.history,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    tools=ARXIV_TOOLS,
+                ),
+            )
+
+            candidate = response.candidates[0]
+            response_content = candidate.content
+
+            # Add Gemini's response to history
+            self.history.append(response_content)
+
+            # Collect any function calls from the response
             function_calls = [
                 part.function_call
-                for part in response.parts
-                if part.function_call.name  # empty name means no function call
+                for part in response_content.parts
+                if part.function_call is not None
             ]
 
             if not function_calls:
-                # No more tool calls — Gemini has the final answer
-                break
+                # No tool calls — extract final text and return
+                final_text = "".join(
+                    part.text
+                    for part in response_content.parts
+                    if part.text is not None
+                )
+                self._log(f"Done after {iteration} steps.")
+                return final_text or "No answer generated. Try rephrasing your question."
 
             # Run each tool and collect results
             tool_response_parts = []
             for fc in function_calls:
-                tool_args = dict(fc.args)
+                tool_args = dict(fc.args) if fc.args else {}
                 self._log(f"Using tool: {fc.name}({json.dumps(tool_args)})")
 
                 result_str = run_tool(fc.name, tool_args)
                 self._log(f"Tool returned {len(result_str)} characters")
 
                 tool_response_parts.append(
-                    genai.protos.Part(
-                        function_response=genai.protos.FunctionResponse(
-                            name=fc.name,
-                            response={"result": result_str},
-                        )
+                    types.Part.from_function_response(
+                        name=fc.name,
+                        response={"result": result_str},
                     )
                 )
 
-            # Send all tool results back to Gemini in one message
-            iteration += 1
-            self._log(f"Thinking... (step {iteration})")
-            response = self.chat.send_message(tool_response_parts)
+            # Send all tool results back as a user message
+            self.history.append(
+                types.Content(role="user", parts=tool_response_parts)
+            )
 
-        # Extract the final text answer
-        final_text = "".join(
-            part.text for part in response.parts if hasattr(part, "text")
-        )
-
-        self._log(f"Done after {iteration} steps.")
-        return final_text or "No answer generated. Try rephrasing your question."
+        return "Agent hit the iteration limit. Try a more specific question."
 
     def reset(self):
         """Clear conversation history to start a fresh research session."""
-        self.chat = self.model.start_chat(enable_automatic_function_calling=False)
+        self.history = []
         self._log("Conversation history cleared.")
