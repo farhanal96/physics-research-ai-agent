@@ -39,12 +39,13 @@ EXAMPLE_QUESTIONS = [
 
 def check_api_key():
     """Make sure the API key is set before we start."""
-    key = os.getenv("ANTHROPIC_API_KEY")
+    key = os.getenv("GEMINI_API_KEY")
     if not key or key == "your_api_key_here":
-        print("\n❌  ANTHROPIC_API_KEY not set.")
+        print("\n❌  GEMINI_API_KEY not set.")
         print("    1. Copy .env.example to .env")
-        print("    2. Add your key from https://console.anthropic.com/")
-        print("    3. Run again\n")
+        print("    2. Get your free key from https://aistudio.google.com/apikey")
+        print("    3. Paste it into your .env file")
+        print("    4. Run again\n")
         sys.exit(1)
 
 
